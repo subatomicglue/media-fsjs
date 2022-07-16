@@ -50,16 +50,16 @@ Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([No
 
 ## Usage:
 ```
-$ ./media-fs.js --help
+> ./test-media-fs.js  --help
 
-media-fs.js filesystem for user apps
+test-media-fs.js filesystem for user apps
 Usage:
-   media-fs.js                                         (outputs the / path)
-   media-fs.js "/"                                     (outputs the / path)
-   media-fs.js <absolute item name>                    (recursive listing retrieval, slow)
-   media-fs.js <relative item name>   <last dir data>  (uses the last dir listing to list the item)
-   media-fs.js --resolve                               (resolve dlna discovery items before returning result)
-   media-fs.js --help                                  (this help)
-   media-fs.js --verbose                               (output verbose information)
+   test-media-fs.js                                         (outputs the / path)
+   test-media-fs.js "/"                                     (outputs the / path)
+   test-media-fs.js <absolute item name>                    (recursive listing retrieval, slow)
+   test-media-fs.js <relative item name>   <last dir data>  (uses the last dir listing to list the item)
+   test-media-fs.js --resolve                               (resolve dlna discovery items before returning result)
+   test-media-fs.js --help                                  (this help)
+   test-media-fs.js --verbose                               (output verbose information)
 ```
 

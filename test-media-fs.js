@@ -1,6 +1,20 @@
 #!/usr/bin/env node
 
 let mediafs = require( "./media-fs" )
+let path = require( 'path' );
+
+function getFilename( filepath ) {
+  return filepath ? filepath.replace( /^.*\//, "" ).replace( /\.[^\.]+$/, "" ) : ""; // remove path and ext
+}
+function getExt( filename ) {
+  let m = filename ? filename.match( /\.[^\.]+$/ ) : "";
+  //console.log( path, m )
+  return m ? m[0] : ""
+}
+function getPath( filepath ) {
+  return filepath ? filepath.replace( /\/[^\/]+$/, "" ).replace( /^$/, "/" ) : ""
+}
+
 
 //////////////////////////////////////////////////////////////////
 // test driver (CLI)
