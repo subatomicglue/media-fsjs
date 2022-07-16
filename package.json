@@ -1,0 +1,16 @@
+{
+  "name": "mediafsjs",
+  "author": "K.Meinert <kevinNOSPAMMMMREMOVETHIS@subatomicglue.com> (https://www.subatomiclabs.com/)",
+  "description": "File browsing and retrieval subsystem for media player apps built on NodeJS.  Root presents a clean list of bookmarks to user-safe locations only.  Mixing several FS types like DLNA/uPnP, LocalFS with a unified way to navigate them all.  Default bookmarks configurable per app.  Folder list item enrichment using available media [default icon, folder icon, embedded icon for supported file types, audio file playtime].  Folder sorting.",
+  "URL": "https://www.subatomiclabs.com/",
+  "email": "kevinNOSPAMMMMREMOVETHIS@subatomicglue.com",
+  "version": "0.0.1",
+  "main": "media-fs.js",
+  "private": true,
+  "dependencies": {
+    "music-metadata": "^7.11.4",
+    "dlnajs": "https://github.com/subatomicglue/dlnajs#main",
+    "xhrjs": "https://github.com/subatomicglue/xhrjs#main",
+    "requestjs": "https://github.com/subatomicglue/requestjs#main"
+  }
+}
