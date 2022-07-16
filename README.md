@@ -15,6 +15,8 @@ Media file browsing and retrieval subsystem for media player apps built on NodeJ
   - less optimally, provide absolute paths and media-fs will recurse appropriately
 
 ## How to use:
+Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([NodeJS](https://nodejs.org/en/)), or through [Electron](https://www.electronjs.org/) bindings to ([NodeJS](https://nodejs.org/en/))...
+
 - User views the root folder:
   - Frontend calls `dir( "/" )` to retrieve the root folder listing, push the listing onto the `previous_listings` stack
 - User navigates to a child `"/Music"`
