@@ -37,6 +37,7 @@ Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([No
 - WE LOVE MUSIC.
 - Depends on [subatomicglue](https://github.com/subatomicglue)'s [ [dlnajs](https://github.com/subatomicglue/dlnajs), [xhrjs](https://github.com/subatomicglue/xhrjs) ]
 - TODO:
+  - `.config` file has hardcoded paths right now, but for production release, we'll need to support `ENV` variables in the pathnames there so we can refer to at least `$HOME` or `~` types of wildcards.
   - Implement sorting (for now, use `Array.sort()`)
   - need to break a bunch of things out to be configurable
     - for now media types are hard coded to only audio types (`m4a`, `aac`, `wav`, `mp3`), and thus this "media filesystem" is oriented to audio only (for now!)
