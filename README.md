@@ -1,6 +1,6 @@
-# media-fs.js - access Media files from NodeJS
+# media-fs.js - Universal Media Filesystem for NodeJS Apps
 
-Media file browsing and retrieval subsystem for media player apps built on NodeJS (Electron, etc...).  
+Media file browsing and retrieval abstraction for media player apps built on NodeJS (Electron, etc...).  
 - Access several FS types like [ `LocalFS`, `DLNA/uPnP` ] using single folder abstraction, with a unified way to navigate them all.
 - Root folder view presents a clean list of bookmarks to user-safe locations only.  
   - (no way for users to explore full filesystem unless you configure that in the app)
