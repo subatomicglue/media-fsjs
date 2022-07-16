@@ -13,7 +13,6 @@ Media file browsing and retrieval subsystem for media player apps built on NodeJ
   - as with a unix `cd` command, we can use relative paths with previous listing data to efficiently descend into the immediate child folders (e.g. avoid recursing from root every time, which is nice for LocalFS, but especially nice for avoiding multiple DLNA discoveries which is expensive).
 - convenient:
   - less optimally, provide absolute paths and media-fs will recurse appropriately
-
 ## How to use:
 Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([NodeJS](https://nodejs.org/en/)), or through [Electron](https://www.electronjs.org/) bindings to ([NodeJS](https://nodejs.org/en/))...
 
@@ -32,6 +31,16 @@ Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([No
 - User goes to an **absolute** path (maybe they bookmarked it)
   - Frontend calls `dir( "/Bookmarked/Path/To/Thing" )` to populate the listing, push the listing onto the stack
 
+### Files:
+- media-fs.js
+  - Javascript lib for accessing Media files on the network
+- test-media-fs.js
+  - command line script to access Media files on the network (test driver for the lib, and educational)
+
+### Install:
+```
+TODO:
+```
 
 ## Status:
 - WE LOVE MUSIC.
@@ -48,10 +57,6 @@ Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([No
     - introduce a "force" flag to repopulate the cache for that one path (frontends could see some "that file no longer exists" warnings, but that could auto trigger a `dir( path, {force: true } )` without user noticing.)
     - could refresh cache on app start, or, keep a cache that persistents between app loads
 
-## Usage:
-```
-TODO:
-```
 ## Testing:
 ```
 > ./test-media-fs.js  --help
