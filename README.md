@@ -1,13 +1,16 @@
 # media-fs.js - Universal Media Filesystem for NodeJS Apps
 
 Media file browsing and retrieval abstraction for media player apps built on NodeJS (Electron, etc...).  
-- Access several FS types like [ `LocalFS`, `DLNA/uPnP` ] using single folder abstraction, with a unified way to navigate them all.
+- Access several filesystem types like [ `LocalFS`, `DLNA/uPnP` ] using a single root folder abstraction, with a unified way to navigate them all.
 - Root folder view presents a clean list of bookmarks to user-safe locations only.  
   - (no way for users to explore full filesystem unless you configure that in the app)
   - like [ `"~/Documents"`, `"~/Music"`, `"~/Downloads"`, `dlna-discovery` ], customizable with config file
 - Default bookmarks configurable per app.  
 - Media types supported [audio, image], and configurable (TODO, see Status section)
-- Folder list item auto-enrichment using available media [default icon, folder icon, file icon, audio file playtime, folder/file timestamp]
+- Folder list items are auto-enriched with rich metadata as available:
+  - **Visual Metadata**:  [ default icon (set in config), folder icon (`folder.jpg|png`), file icon (`<filename>.jpg|png`), file's metadata icon (stored within mp3, m4a, etc)]
+  - **Audio Metadata**: [ title, artist, album, duration ]
+  - **Filesystem Metadata**: [ timestamp, file size ]
 - Folder sorting
 - efficient:
   - as with a unix `cd` command, we can use relative paths with previous listing data to efficiently descend into the immediate child folders (e.g. avoid recursing from root every time, which is nice for LocalFS, but especially nice for avoiding multiple DLNA discoveries which is expensive).
