@@ -18,6 +18,7 @@ Media file browsing and retrieval abstraction for media player apps built on Nod
   - as with a unix `cd` command, we can use relative paths with previous listing data to efficiently descend into the immediate child folders (e.g. avoid recursing from root every time, which is nice for LocalFS, but especially nice for avoiding multiple DLNA discoveries which is expensive).
 - convenient:
   - less optimally, provide absolute paths and `media-fs` will recurse appropriately
+- environment variables (e.g. `${HOME}`) in `.config` root folder bookmarks
 ## How to use:
 Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([NodeJS](https://nodejs.org/en/)), or through [Electron](https://www.electronjs.org/) bindings to ([NodeJS](https://nodejs.org/en/))...
 
@@ -37,6 +38,8 @@ Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([No
   - Frontend calls `dir( "/Bookmarked/Path/To/Thing" )` to populate the listing, push the listing onto the stack
 
 ### Files:
+- .config
+  - Configuration file for the app
 - media-fs.js
   - Javascript lib for accessing Media files on the network
 - test-media-fs.js
@@ -51,7 +54,6 @@ TODO:
 - WE LOVE MUSIC.
 - Depends on [subatomicglue](https://github.com/subatomicglue)'s [ [dlnajs](https://github.com/subatomicglue/dlnajs), [xhrjs](https://github.com/subatomicglue/xhrjs) ]
 - TODO:
-  - `.config` file has hardcoded paths right now, but for production release, we'll need to support `ENV` variables in the pathnames there so we can refer to at least `$HOME` or `~` types of wildcards.
   - Implement sorting (for now, use `Array.sort()`)
   - need to break a bunch of things out to be configurable
     - for now media types are hard coded to only audio types (`m4a`, `aac`, `wav`, `mp3`), and thus this "media filesystem" is oriented to audio only (for now!)

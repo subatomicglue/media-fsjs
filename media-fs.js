@@ -5,7 +5,15 @@ let path = require( 'path' );
 let musicmetadata = require( 'music-metadata' );
 
 // config data
-let configname = ".config";
+const DEFAULT_CONFIG = {
+  root_folder_listing: [
+    { path: "Music", fullpath: "~/Music" },
+    { path: "Documents", fullpath: "${HOME}/Documents" },
+    { path: "Downloads", fullpath: "${HOME}/Downloads" },
+    { path: "uPnP Media Servers", _type: "dlna.discovery" },
+  ]
+};
+let CONFIGNAME = ".config";
 const ROOTFOLDER = { name: "/", path: "/", _type: "root", type: "dir", fullpath: "root:///", fullpath_parent: "root:///", abs_path: "/", abs_path_parent: "/", root_path: "/" }
 let VERBOSE=false;
 
@@ -176,29 +184,39 @@ function dlnaTimeToSeconds( hr ) {
   let d = s[0].split( ":" )
   return (d[0] * 24 * 60 * 60) + (d[1] * 60 * 60) + (d[2] * 60) + s[1] // convert to number of seconds...
 }
+function replaceEnvVars( str ) {
+  return str.replace( /\${([^}]+)}/g, (all, first) => process.env[first] ).replace( /~/, (all, first) => process.env.HOME )
+}
 
-
+function saveConfig( obj, filename = CONFIGNAME ) {
+  fs.writeFileSync( filename, JSON.stringify( obj, null, '  ' ), "utf8" )
+  if (!fs.existsSync( filename ))
+    console.log( `[error] couldn't write to ${filename}` )
+}
+function loadConfig( filename = CONFIGNAME, default_config_obj = DEFAULT_CONFIG ) {
+  if (!fs.existsSync( filename ))
+    saveConfig( default_config_obj );
+  if (fs.existsSync( filename ))
+    return JSON.parse( fs.readFileSync( filename, 'utf-8' ) );
+  console.log( `[error] ${filename} not found` )
+  return {};
+}
 
 //////////////////////////////////////////////////////////////
 // directory abstraction: ROOT BOOKMARKS
 
 // get a "directory listing" of the root bookmarks configured/saved.
 async function dirRoot( resolve = false ) {
-  if (!fs.existsSync( configname )) {
-    fs.writeFileSync( configname, JSON.stringify([
-      { path: "Music", fullpath: path.join( process.env.HOME, "Music" ) },
-      { path: "Documents", fullpath: path.join( process.env.HOME, "Documents" ) },
-      { path: "Downloads", fullpath: path.join( process.env.HOME, "Downloads" ) },
-      { path: "uPnP Media Servers", _type: "dlna.discovery" },
-    ]), "utf8" )
+  let config = loadConfig( CONFIGNAME )
+  if (config && config.root_folder_listing) {
+    let listing = config.root_folder_listing;
+    listing = listing.map( r => { if (r.fullpath) r.fullpath = replaceEnvVars( r.fullpath ); return r } );
+    listing = listing.map( r => (r._type == undefined || r._type == "fs.dir" || r._type == "fs.file") ? enrichFS( r ) : (r._type.match( /^dlna./ )) ? enrichDLNA( r ) : r );
+    if (resolve) listing = await resolveItems( listing ); // potentially expands certain single items to multiple
+    return listing;
   }
-  if (fs.existsSync( configname )) {
-    let config = JSON.parse( fs.readFileSync( configname, 'utf-8' ) )
-    config = config.map( r => (r._type == undefined || r._type == "fs.dir" || r._type == "fs.file") ? enrichFS( r ) : (r._type.match( /^dlna./ )) ? enrichDLNA( r ) : r );
-    if (resolve) config = await resolveItems( config ); // potentially expands certain single items to multiple
-    return config;
-  }
-  process.exit( -1 );
+  console.log( "[error] couldn't find config file for the root folder, see previous errors for diagnosis" )
+  VERBOSE && process.exit( -1 );
 }
 
 //////////////////////////////////////////////////////////////
@@ -334,7 +352,7 @@ async function resolveItems( items ) {
 // PUBLIC API
 
 function init( options = { configname: ".config" } ) {
-  if (options.configname) configname = options.configname;
+  if (options.configname) CONFIGNAME = options.configname;
 }
 module.exports.init = init;
 
