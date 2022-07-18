@@ -11,7 +11,7 @@ Media file browsing and retrieval abstraction for media player apps built on Nod
 - Media types supported [audio, image], and configurable (TODO, see Status section)
 - Folder list items are auto-enriched with rich metadata as available:
   - **Visual Metadata**:  [ default icon (set in config), folder icon (`folder.jpg|png`), file icon (`<filename>.jpg|png`), file's metadata icon (stored within mp3, m4a, etc)]
-  - **Audio Metadata**: [ title, artist, album, duration ]
+  - **Audio Metadata**: [ title, artist, album, duration in seconds, human readable runningtime ]
   - **Filesystem Metadata**: [ timestamp, file size ]
 - Folder sorting
 - efficient:
@@ -51,6 +51,7 @@ TODO:
 ```
 
 ## Status:
+- Very much ALPHA status for right now (still check in features, some of the above dont quite exist or are broken)
 - WE LOVE MUSIC.
 - Depends on [subatomicglue](https://github.com/subatomicglue)'s [ [dlnajs](https://github.com/subatomicglue/dlnajs), [xhrjs](https://github.com/subatomicglue/xhrjs) ]
 - TODO:

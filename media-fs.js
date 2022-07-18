@@ -7,41 +7,56 @@ let musicmetadata = require( 'music-metadata' );
 // config data
 const DEFAULT_CONFIG = {
   root_folder_listing: [
-    { path: "Music", fullpath: "~/Music" },
-    { path: "Documents", fullpath: "${HOME}/Documents" },
-    { path: "Downloads", fullpath: "${HOME}/Downloads" },
+    { path: "Music", _type: "fs.dir", resource: "~/Music" },
+    { path: "Documents", _type: "fs.dir", resource: "${HOME}/Documents" },
+    { path: "Downloads", _type: "fs.dir", resource: "${HOME}/Downloads" },
     { path: "uPnP Media Servers", _type: "dlna.discovery" },
   ]
 };
 let CONFIGNAME = ".config";
-const ROOTFOLDER = { name: "/", path: "/", _type: "root", type: "dir", fullpath: "root:///", fullpath_parent: "root:///", abs_path: "/", abs_path_parent: "/", root_path: "/" }
+const ROOTFOLDER = { name: "/", path: "/", _type: "root", type: "dir", resource: "root:///", resource_parent: "root:///", abs_path: "/", abs_path_parent: "/", root_path: "/" }
 let VERBOSE=false;
 
 //////////////////////////////////////////////////////////////
 // UTILITIES
 
+// filter the path to NOT have file://
+function fsPath( path ) {
+  return path && path.match( /^file:\/\// ) ? path.replace( /^file:\/\//, "" ) : path
+}
+
+// filter the path to have file://
+function httpPath( path ) {
+  return path && (!path.match( /^file:\/\// )) ? ("file://" + path) : path
+}
+
 // fs.accessSync is so close, yet just not there.   Make it return true/false:
 function checkPermissions( file, perms ) {
   try {
-    fs.accessSync(file, perms);
+    fs.accessSync(fsPath( file ), perms);
     return true;
   } catch (err) {
     return false;
   }
 }
-function getExt( path ) {
-  return path.replace( /^.*([^.]+)$/, "$1" ).toLowerCase()
-}
+
+// is the directory good to read/write?
 function dirIsGood( path, writable = false ) {
+  path = fsPath( path )
   let perms = fs.constants.R_OK;
   if (writable) perms = perms | fs.constants.W_OK;
   return fs.existsSync( path ) && checkPermissions( path, perms ) && fs.statSync( path ).isDirectory()
 }
+
+// is the file good to read/write?
 function fileIsGood( path, writable = false ) {
+  path = fsPath( path )
   let perms = fs.constants.R_OK;
   if (writable) perms = perms | fs.constants.W_OK;
   return fs.existsSync( path ) && checkPermissions( path, perms ) && fs.statSync( path ).isFile()
 }
+
+// LocalFS metadata: get the mime type for the filename based on extension
 function getMime( filename ) {
   switch (getExt( filename )) {
     case ".jpg": return "image/jpeg";
@@ -55,43 +70,58 @@ function getMime( filename ) {
   }
 }
 
-function getType( fullpath ) {
+// LocalFS metadata: get the type of LocalFS object pointed to by the path, fs.dir or fs.file
+function getType( path ) {
   try {
-    let type = fs.statSync( fullpath ).isDirectory() ? "fs.dir" : "fs.file"
-    //console.log( type , fullpath )
+    let type = fs.statSync( fsPath( path ) ).isDirectory() ? "fs.dir" : "fs.file"
+    //console.log( type , path )
     return type;
   } catch (e) {
     return "unreadable";
   }
 }
 
-function getTime( fullpath ) {
+// LocalFS metadata: get the timestamp of the fs object
+function getTime( path ) {
   try {
-    return fs.statSync( fullpath ).mtimeMs;
+    return fs.statSync( fsPath( path ) ).mtimeMs;
   } catch (e) {
     return -1;
   }
 }
 
+
+// get the file extension  e.g. ".mp3"
+// function getExt( path ) {
+//   return path.replace( /^.*([^.]+)$/, "$1" ).toLowerCase()
+// }
 function getExt( filename ) {
   let m = filename ? filename.match( /\.[^\.]+$/ ) : "";
   //console.log( path, m )
   return m ? m[0] : ""
 }
 
+// get the file path  e.g. "/home/user/happyuser/Downloads"
 function getPath( filepath ) {
   return filepath ? filepath.replace( /\/[^\/]+$/, "" ).replace( /^$/, "/" ) : ""
 }
 
+// get the file name  e.g. "subatomicglue - aeonblue - dance of the butterfly"
 function getFilename( filepath ) {
   return filepath ? filepath.replace( /^.*\//, "" ).replace( /\.[^\.]+$/, "" ) : ""; // remove path and ext
 }
+
+// get the foldername e.g. Downloads
 function getFoldername( filepath ) {
   return filepath ? filepath.replace( /^.*?([^\/]+)$/, "$1" ) : ""; // remove path and ext
 }
+
+// get the parent foldername e.g. happyuser
 function getParentname( filepath ) {
   return filepath ? filepath.replace( /[^\/]+$/, "" ).replace( /\/$/, "" ).replace( /^.*\//, "" ).replace( /^$/, "/" ) : ""; // remove path and ext
 }
+
+// collapase ".." in filepath.  e.g. "/home/user/happyuser/../Downloads/.." becomes "/home/user"
 function eliminateDotDot( filepath ) {
   return filepath ? filepath.replace( /\/[^\/]+\/\.\./g, "" ).replace( /^$/, "/" ) : ""
 }
@@ -101,12 +131,14 @@ function shortenImageName( i, rootdir ) {
 }
 
 function getImage( filepath ) {
+  filepath = fsPath( filepath );
   if (filepath == undefined) return "assets/default.png"
 
   // if (fs.statSync( filepath ).isDirectory()) {
   // }
   let path_filename = path.join( getPath( filepath ), getFilename( filepath ) );
   let image = (
+    // TODO: detect if <filepath> is an image type, (maybe) generate a thumbnail for it, and return a link to the thumb (or actual file)
     fs.existsSync( path.join( filepath, "Folder.jpg" ) ) ? ("file://" + path.join( filepath, "Folder.jpg" )) :
     fs.existsSync( path.join( filepath, "Folder.png" ) ) ? ("file://" + path.join( filepath, "Folder.png" )) :
     fs.existsSync( path.join( filepath, "Folder.gif" ) ) ? ("file://" + path.join( filepath, "Folder.gif" )) :
@@ -141,25 +173,73 @@ function enrich( item, virtual_dir = "" ) {
   item.abs_path_parent = getPath( item.abs_path );
   item.root_path = virtual_dir.replace( /^(\/[^\/]+).*$/, "$1" ).replace( /^$/, "/" );
 }
-function enrichFS( item, virtual_dir = "" ) {
+async function enrichFS( item, virtual_dir = "" ) {
   //VERBOSE && console.log( "enriching: ", item )
-  item.name = getFilename( item.fullpath );
-  if (getExt( item.fullpath ) != "")
-    item.ext = getExt( item.fullpath );
-  item._type = item._type == undefined ? getType( item.fullpath ) : item._type;
-  fillCategory( item );
-  item.time = getTime( item.fullpath );
-  item.image = getImage( item.fullpath );
+
+  // VirtualFS metadata:
   enrich( item, virtual_dir );
-  item.fullpath_parent = item.abs_path_parent == '/' ? undefined : item.fullpath.replace( /\/[^\/]+$/, "" ).replace( /^$/, "/" );
+
+  // LocalFS metadata:
+  item.name = getFilename( item.resource );
+  if (getExt( item.resource ) != "")
+    item.ext = getExt( item.resource );
+  item._type = item._type == undefined ? getType( item.resource ) : item._type;
+  fillCategory( item );
+  item.time = getTime( item.resource );
+  item.image = getImage( item.resource );
+  if (item._type == "fs.file") item.content = httpPath( item.resource );
+  item.resource_parent = item.abs_path_parent == '/' ? undefined : item.resource.replace( /\/[^\/]+$/, "" ).replace( /^$/, "/" );
+
+  // Audio metadata:
+  await enrichFS_Audio( item, virtual_dir );
+
   return item;
 }
 
-function enrichDLNA( item, virtual_dir = "" ) {
+async function enrichFS_Audio( r, virtual_dir = "" ) {
+  let ext_2_mime = {
+    m4a: "audio/mp4",
+    aac: "audio/aac",
+    mp3: "audio/mpeg",
+    wav: "audio/x-wav",
+  }
+  // https://www.npmjs.com/package/node-id3
+  if (r._type == "fs.file" && r.ext && r.ext.match( new RegExp( `/${Object.keys( ext_2_mime ).join("|")}/i` ) )){
+    let ext = getExt( r.resource );
+    const tags = await musicmetadata.parseFile( r.resource, { duration: false } ); // duration takes a long time for mp3 files...
+    //console.log( "tagging....", r, tags )
+    //r.path = tags.common.title ? tags.common.title : r.path;
+    r.title = tags.common.title;
+    r.artist = tags.common.artist;
+    r.album = tags.common.album;
+    if (tags.common.picture) {
+      let picture = musicmetadata.selectCover( tags.common.picture ); // pick the cover image
+      if (picture) {
+        r.picture = convertBufferToImageEmbed( picture.data, picture.format );
+        //console.log( "picture", r.picture )
+      }
+    }
+    r.duration = tags.format.duration
+    r.runningtime = tags.format.duration ? toHumanReadableTime( tags.format.duration ) : "??";
+  }
+}
+
+function enrichDLNA( item, dlna_src, virtual_dir = "" ) {
   //VERBOSE && console.log( "enriching: ", item )
-  item.name = getParentname( virtual_dir );
+  [
+    {dlna: 'title', item: 'title'},
+    {dlna: 'title', item: 'name'},
+    {dlna: 'album', item: 'album'},
+    {dlna: 'artist', item: 'artist'},
+    {dlna: 'genre', item: 'genre'},
+    {dlna: 'art', item: 'art'},
+    {dlna: 'icon', item: 'icon'},
+    {dlna: 'description', item: 'description'},
+    {dlna: 'file', item: 'content'},
+  ].forEach( m => { if (dlna_src && dlna_src[m.dlna]) item[m.item] = dlna_src[m.dlna] } )
   item._type = item._type == undefined ? "dlna.object.container.storageFolder" : item._type;
   fillCategory( item );
+  if (item.type == "file") item.content = item.resource;
   enrich( item, virtual_dir );
   return item;
 }
@@ -210,8 +290,12 @@ async function dirRoot( resolve = false ) {
   let config = loadConfig( CONFIGNAME )
   if (config && config.root_folder_listing) {
     let listing = config.root_folder_listing;
-    listing = listing.map( r => { if (r.fullpath) r.fullpath = replaceEnvVars( r.fullpath ); return r } );
-    listing = listing.map( r => (r._type == undefined || r._type == "fs.dir" || r._type == "fs.file") ? enrichFS( r ) : (r._type.match( /^dlna./ )) ? enrichDLNA( r ) : r );
+    listing = listing.map( r => { if (r.resource) r.resource = replaceEnvVars( r.resource ); return r } );
+    // use for loop for async/await
+    for (let i = 0; i < listing.length; ++i) {
+      let r = listing[i];
+      listing[i] = (r._type == undefined || r._type == "fs.dir" || r._type == "fs.file") ? await enrichFS( r ) : (r._type.match( /^dlna./ )) ? enrichDLNA( r ) : r;
+    }
     if (resolve) listing = await resolveItems( listing ); // potentially expands certain single items to multiple
     return listing;
   }
@@ -224,59 +308,31 @@ async function dirRoot( resolve = false ) {
 
 // get a directory listing of the filesystem path given
 async function dirFS( dir, virtual_dir ) {
-  VERBOSE && console.log( " - dirFS():", dir, virtual_dir );
+  VERBOSE && console.log( " - dirFS():", fsPath( dir ), virtual_dir );
 
   // get the directory listing:
-  let result = fs.readdirSync( dir )
+  let result = fs.readdirSync( fsPath( dir ) )
     // map the result to our format
-    .map( r => enrichFS( { path: r, fullpath: path.join( dir, r ) }, virtual_dir ) )
-    // only let through dirs or audio files
-    .filter( r => r._type == "fs.dir" || (r._type == "fs.file" && r.ext && r.ext.match( /m4a|aac|mp3|wav/i )) ) // |txt|jpg|png|gif
+    .map( r => ({ path: r, resource: path.join( fsPath( dir ), r ) }) )
 
-  // add the . and .. directories
-  // let dot = enrichFS( { path: getFoldername( virtual_dir ), fullpath: dir }, virtual_dir );
-  // dot.path = "."
-  // dot.name = "."
+  // because of async/await, use for loop instead of map
+  for (let i = 0; i < result.length; ++i) {
+    result[i] = await enrichFS( result[i], virtual_dir )
+  }
+
+  // only let through dirs or audio files
+  result = result.filter( r => r._type == "fs.dir" || (r._type == "fs.file" && r.ext && r.ext.match( /m4a|aac|mp3|wav/i )) ) // |txt|jpg|png|gif
+
+  // add the .. folder (this filesystem type supports listing parent)
   let virtual_parent = getPath( virtual_dir );
   if (virtual_parent == '/') {
     let dotdot = JSON.parse( JSON.stringify( ROOTFOLDER ))
     dotdot.path = ".."
     result.unshift( dotdot );
   } else {
-    let dotdot = { path: "..", fullpath: getPath( dir ) };
-    dotdot = enrichFS( dotdot, virtual_dir );
+    let dotdot = { path: "..", resource: getPath( dir ) };
+    dotdot = await enrichFS( dotdot, virtual_dir );
     result.unshift( dotdot );
-  }
-
-  // fill in pretty names
-  for (let x = 0; x < result.length; ++x) {
-    let r = result[x];
-
-    // https://www.npmjs.com/package/node-id3
-    if (r._type == "fs.file" && r.ext.match( /m4a|aac|mp3|wav/i )){
-      let ext_2_mime = {
-        m4a: "audio/mp4",
-        aac: "audio/aac",
-        mp3: "audio/mpeg",
-        wav: "audio/x-wav",
-      }
-      let ext = getExt( r.fullpath );
-      const tags = await musicmetadata.parseFile( r.fullpath, { duration: false } ); // duration takes a long time for mp3 files...
-      //console.log( "tagging....", r, tags )
-      //r.path = tags.common.title ? tags.common.title : r.path;
-      r.title = tags.common.title;
-      r.artist = tags.common.artist;
-      r.album = tags.common.album;
-      if (tags.common.picture) {
-        let picture = musicmetadata.selectCover( tags.common.picture ); // pick the cover image
-        if (picture) {
-          r.picture = convertBufferToImageEmbed( picture.data, picture.format );
-          //console.log( "picture", r.picture )
-        }
-      }
-      r.duration = tags.format.duration
-      r.runningtime = tags.format.duration ? toHumanReadableTime( tags.format.duration ) : "??";
-    }
   }
 
   // sort certain directories by time:
@@ -295,15 +351,15 @@ async function dirDlna( path = undefined, virtual_dir = "", item ) {
   VERBOSE && console.log( " - dirDlna():", path, virtual_dir );
 
   if (path && path != "/") {
-    let fullpath = path.split( "|" )
-    let url = fullpath[0]
-    let id = fullpath[1]
+    let resource = path.split( "|" )
+    let url = resource[0]
+    let id = resource[1]
     VERBOSE && console.log( `dlna url: "${url}"` )
     VERBOSE && console.log( `dlna id:  "${id}"` )
     let dlna_listing = await dlna.content( [ "content", url, id ] );
     let listing = dlna_listing.items.map( r => {
-      let result = { path: r.title, fullpath: url + "|" + r.id, fullpath_parent: url + "|" + r.parentID, _type: "dlna." + r.class, /*r: r*/ };
-      if (r.file) { result.fullpath = r.file;  result.ext = getExt( r.file ); }
+      let result = { path: r.title, resource: url + "|" + r.id, resource_parent: url + "|" + r.parentID, _type: "dlna." + r.class, /*r: r*/ };
+      if (r.file) { result.resource = r.file;  result.ext = getExt( r.file ); }
       if (r.file_size) result.file_size = r.file_size
       if (r.file_duration) {
         let s = r.file_duration.split( "." )
@@ -311,16 +367,16 @@ async function dirDlna( path = undefined, virtual_dir = "", item ) {
         result.duration = (d[0] * 24 * 60 * 60) + (d[1] * 60 * 60) + (d[2] * 60) + s[1] // convert to number of seconds...
       }
       if (r.file_duration) result.runningtime = r.file_duration
-      return enrichDLNA( result, virtual_dir )
+      return enrichDLNA( result, r, virtual_dir )
     })
     // ok... we can't support "..", because we dont get a parent ID for the _current_ directory, only the parent of the children (which is the ID for the cwd)
     // so.   the frontend media player will need to implement a browser "<" back button based on history (a good idea anyways).
-    // let dotdot = enrichDLNA( { path: "..", name: getFoldername( virtual_dir ), fullpath: item.fullpath_parent }, virtual_dir )
+    // let dotdot = enrichDLNA( { path: "..", name: getFoldername( virtual_dir ), resource: item.resource_parent }, virtual_dir )
     // listing.unshift( dotdot )
     return listing;
   } else {
     let disc = await dlna.info();
-    return Object.keys( disc ).map( r => enrichDLNA( { path: disc[r].name, fullpath: disc[r].contentdir_control_url + "|0", _type: "dlna.mediaserver" }, virtual_dir ) );
+    return Object.keys( disc ).map( r => enrichDLNA( { path: disc[r].name, resource: disc[r].contentdir_control_url + "|0", _type: "dlna.mediaserver" }, virtual_dir ) );
   }
 }
 
@@ -413,8 +469,8 @@ async function dir( path = "/", listing = undefined, resolve = false, absolute_p
       break;
 
     case "fs.dir":
-      if (dirIsGood( item.fullpath )) {
-        listing = await dirFS( item.fullpath, absolute_path );
+      if (dirIsGood( item.resource )) {
+        listing = await dirFS( item.resource, absolute_path );
       }
       break;
 
@@ -426,7 +482,7 @@ async function dir( path = "/", listing = undefined, resolve = false, absolute_p
       // handle all other "dlna.*" types here:
       //console.log( item )
       if (item._type.match( /^dlna\./ )) {
-        listing = await dirDlna( item.fullpath, absolute_path )
+        listing = await dirDlna( item.resource, absolute_path )
       }
       break;
   }
