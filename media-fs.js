@@ -519,7 +519,7 @@ async function dir( path = "/", listing = undefined, resolve = false, absolute_p
 
   // SEED: create a listing for "/" root, so we can find the "/" item to recurse from
   if (listing == undefined)
-    listing = [ROOTFOLDER];
+    listing = [JSON.parse( JSON.stringify( ROOTFOLDER ))];
 
   // we support relative path(s) or absolute:
   // - abs:  path "/Music" or "Music" given without listing (recursion begins relative to root in absense of a previous listing given)
