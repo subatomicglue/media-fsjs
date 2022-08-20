@@ -3,6 +3,7 @@
 let mediafs = require( "./media-fs" )
 let path = require( 'path' );
 
+
 function getFilename( filepath ) {
   return filepath ? filepath.replace( /^.*\//, "" ).replace( /\.[^\.]+$/, "" ) : ""; // remove path and ext
 }
@@ -14,7 +15,6 @@ function getExt( filename ) {
 function getPath( filepath ) {
   return filepath ? filepath.replace( /\/[^\/]+$/, "" ).replace( /^$/, "/" ) : ""
 }
-
 
 //////////////////////////////////////////////////////////////////
 // test driver (CLI)
@@ -84,6 +84,8 @@ if (non_flag_args_required != 0 && (ARGC == 0 || !(non_flag_args >= non_flag_arg
 }
 //////////////////////////////////////////
 
+
+// main entrypoint
 (async () => {
   mediafs.setVerbose( VERBOSE );
   let result = await mediafs.dir( args.length == 0 ? "/" : args[0], args.length > 1 ? JSON.parse( args[1] ) : undefined, RESOLVE );

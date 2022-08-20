@@ -8,9 +8,10 @@
   "main": "media-fs.js",
   "private": true,
   "dependencies": {
-    "music-metadata": "^7.11.4",
+    "detect-rpi": "^1.4.0",
     "dlnajs": "https://github.com/subatomicglue/dlnajs#main",
-    "xhrjs": "https://github.com/subatomicglue/xhrjs#main",
-    "requestjs": "https://github.com/subatomicglue/requestjs#main"
+    "music-metadata": "^7.11.4",
+    "requestjs": "https://github.com/subatomicglue/requestjs#main",
+    "xhrjs": "https://github.com/subatomicglue/xhrjs#main"
   }
 }

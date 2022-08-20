@@ -3,6 +3,7 @@ let xhr = require( 'xhrjs/xhr.js' ).xhr;
 let fs = require( 'fs' );
 let path = require( 'path' );
 let musicmetadata = require( 'music-metadata' );
+let isPi = require( 'detect-rpi' ); // detect raspberry pi
 
 // config data
 const DEFAULT_CONFIG = {
@@ -16,6 +17,7 @@ const DEFAULT_CONFIG = {
 let CONFIGNAME = ".config";
 const ROOTFOLDER = { name: "/", path: "/", _type: "root", type: "dir", resource: "root:///", resource_parent: "root:///", abs_path: "/", abs_path_parent: "/", root_path: "/" }
 let VERBOSE=false;
+let USERDIR = getUserDir( "media-fs" );
 
 //////////////////////////////////////////////////////////////
 // UTILITIES
@@ -268,26 +270,106 @@ function replaceEnvVars( str ) {
   return str.replace( /\${([^}]+)}/g, (all, first) => process.env[first] ).replace( /~/, (all, first) => process.env.HOME )
 }
 
+// filename is relative (without a path), defaults to CONFIGNAME, and will be relative to the USERDIR (which depends on appname set by init())
 function saveConfig( obj, filename = CONFIGNAME ) {
-  fs.writeFileSync( filename, JSON.stringify( obj, null, '  ' ), "utf8" )
-  if (!fs.existsSync( filename ))
-    console.log( `[error] couldn't write to ${filename}` )
+  let filepath = path.join( USERDIR, filename );
+  fs.writeFileSync( filepath, JSON.stringify( obj, null, '  ' ), "utf8" )
+  if (!fs.existsSync( filepath ))
+    console.log( `[error] couldn't write to ${filepath}` )
 }
+
+// filename is relative (without a path), defaults to CONFIGNAME, and will be relative to the USERDIR (which depends on appname set by init())
 function loadConfig( filename = CONFIGNAME, default_config_obj = DEFAULT_CONFIG ) {
-  if (!fs.existsSync( filename ))
-    saveConfig( default_config_obj );
-  if (fs.existsSync( filename ))
-    return JSON.parse( fs.readFileSync( filename, 'utf-8' ) );
-  console.log( `[error] ${filename} not found` )
+  let filepath = path.join( USERDIR, filename );
+  if (!fs.existsSync( filepath ))
+    saveConfig( default_config_obj, filename );
+  if (fs.existsSync( filepath )) {
+    console.log( `[config] loaded from ${filepath}`)
+    return JSON.parse( fs.readFileSync( filepath, 'utf-8' ) );
+  }
+  console.log( `[error] ${filepath} not found` )
   return {};
 }
+
+// like bash's mkdir -p, create the directory only if it doesn't already exist
+function mkdir( dir ) {
+  if (!fs.existsSync(dir)){
+    VERBOSE && console.log( `[mkdir] creating directory ${dir}` )
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+// get a name for the platform we're running on
+function getPlatform() {
+  return isPi() ? "pi" : process.platform;
+}
+
+function getUserDir( name ) {
+  const appname = name;
+  const dotappname = "." + name;
+  // every path in the checklist needs to point to an app subfolder e.g. /subatomic3ditor,
+  let checklist = {
+    "pi": [
+      path.join( "/media/pi/USB", appname ),
+      path.join( "/media/pi/SDCARD", appname ),
+      path.join( process.env.HOME, dotappname ),
+      path.join( process.env.HOME, "Documents", appname ),
+      path.join( process.env.HOME, "Downloads", appname ),
+      path.join( process.env.HOME, "Desktop", appname ),
+    ],
+    "darwin": [
+      path.join( process.env.HOME, "Library/Preferences", appname ),
+      path.join( process.env.HOME, dotappname ),
+      path.join( process.env.HOME, "Documents", appname ),
+      path.join( process.env.HOME, "Downloads", appname ),
+      path.join( process.env.HOME, "Desktop", appname ),
+    ],
+    "win32": [
+      path.join( process.env.HOME, "AppData", appname ),
+      path.join( process.env.HOME, dotappname ),
+      path.join( process.env.HOME, "Documents", appname ),
+      path.join( process.env.HOME, "Downloads", appname ),
+      path.join( process.env.HOME, "Desktop", appname ),
+    ],
+    "linux": [
+      path.join( process.env.HOME, dotappname ),
+      path.join( process.env.HOME, "Documents", appname ),
+      path.join( process.env.HOME, "Downloads", appname ),
+      path.join( process.env.HOME, "Desktop", appname ),
+    ],
+    "unknown": [
+      path.join( process.env.HOME, dotappname ),
+      path.join( process.env.HOME, "Documents", appname ),
+      path.join( process.env.HOME, "Downloads", appname ),
+      path.join( process.env.HOME, "Desktop", appname ),
+    ],
+  }
+  let platform = getPlatform();
+  let cl = checklist[platform] ? checklist[platform] : checklist["unknown"];
+  for (let d of cl) {
+    // every path in the checklist points to an app subfolder /${name},
+    // so check for the parent dir existing (we dont want to create Documents on a system that doesn't have it!)
+    let onelevelup = d.replace( /[\\/][^\\/]+$/, "" )
+    VERBOSE && console.log( `[getUserDir] checking "${d}", "${onelevelup}" == ${dirIsGood( onelevelup, true )}` )
+    if (dirIsGood( onelevelup, true )) {
+      mkdir( d );
+      return d;
+    }
+  }
+  VERBOSE && console.log( `[getUserDir] ERROR: no user directory found on this "${platform}" system!  After checking through these options: `, cl );
+  return undefined;
+}
+
+
+
+
 
 //////////////////////////////////////////////////////////////
 // directory abstraction: ROOT BOOKMARKS
 
 // get a "directory listing" of the root bookmarks configured/saved.
 async function dirRoot( resolve = false ) {
-  let config = loadConfig( CONFIGNAME )
+  let config = loadConfig()
   if (config && config.root_folder_listing) {
     let listing = config.root_folder_listing;
     listing = listing.map( r => { if (r.resource) r.resource = replaceEnvVars( r.resource ); return r } );
@@ -407,13 +489,20 @@ async function resolveItems( items ) {
 //////////////////////////////////////////////////////////////
 // PUBLIC API
 
-function init( options = { configname: ".config" } ) {
+// initialize the library before using the API functions.
+// appname - important to name your application to distinguish configuration settings between multiple apps that use media-fs
+function init( options = { configname: ".config", appname: "media-fs" } ) {
+  if (options.appname) USERDIR = getUserDir( options.appname );
   if (options.configname) CONFIGNAME = options.configname;
 }
 module.exports.init = init;
 
 
 // return a listing at the directory (recursive utility)
+// path    - the virtual absolute path "/Music" (listing must be undefined) or virtual relative path "Music" (requires a listing).
+//           dir() or dir( "/" ) retrieves the root of the virtual filesystem
+// listing - when using a virtual relative path, supply the path's parent folder listing.  Avoids redundant lookups (single lookup for each relative path).
+// resolve - certain types are lazy loaded, like _type="dlna.discovery", call dir( "/" ) then dir( "/", undefined, true ) to replace the list item with it's children
 async function dir( path = "/", listing = undefined, resolve = false, absolute_path = "", previous_item = undefined ) {
   //VERBOSE && console.log( "dir", path, listing, resolve )
   // sanitize erroneous /'s
@@ -497,5 +586,39 @@ async function dir( path = "/", listing = undefined, resolve = false, absolute_p
 
 module.exports.dir = dir;
 
+// debugging verbosity, default false
+module.exports.setVerbose = ( verbose = false ) => { VERBOSE = verbose }
 
-module.exports.setVerbose = ( verbose ) => { VERBOSE = verbose }
+// remove a bookmark from the root.  written to configuration settings, persists across app load
+function delRootBookmark( path ) {
+  let config = loadConfig()
+  if (config && config.root_folder_listing) {
+    config.root_folder_listing = config.root_folder_listing.filter( r => r.path != path )
+    saveConfig( config )
+  }
+}
+
+// add a bookmark to the root.  written to configuration settings, persists across app load
+function addRootBookmark( obj ) {
+  if (obj.path && (obj._type || obj.resource)) {
+    let config = loadConfig()
+    if (config && config.root_folder_listing) {
+      config.root_folder_listing.push( obj )
+      saveConfig( config )
+    }
+  }
+}
+
+// add a (LocalFS path) bookmark to the root.  written to configuration settings, persists across app load
+function addRootBookmark_FS( fs_path ) {
+  addRootBookmark( { path: getFoldername( fs_path ), resource: fs_path } )
+}
+
+// add a (dlna discovery) bookmark to the root.  written to configuration settings, persists across app load
+function addRootBookmark_DLNA() {
+  addRootBookmark( { path: "uPnP Media Servers", _type: "dlna.discovery" } )
+}
+
+module.exports.delRootBookmark = delRootBookmark
+module.exports.addRootBookmark_FS = addRootBookmark_FS
+module.exports.addRootBookmark_DLNA = addRootBookmark_DLNA

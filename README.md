@@ -22,6 +22,7 @@ Media file browsing and retrieval abstraction for media player apps built on Nod
 ## How to use:
 Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([NodeJS](https://nodejs.org/en/)), or through [Electron](https://www.electronjs.org/) bindings to ([NodeJS](https://nodejs.org/en/))...
 
+UseCases:
 - User views the root folder:
   - Frontend calls `dir( "/" )` to retrieve the root folder listing, push the listing onto the `previous_listings` stack
 - User navigates to a child `"/Music"`
@@ -38,16 +39,62 @@ Typically you'll have a Frontend (HTML and Javascript) calling a datasevice ([No
   - Frontend calls `dir( "/Bookmarked/Path/To/Thing" )` to populate the listing, push the listing onto the stack
 
 ### Files:
-- .config
-  - Configuration file for the app
-- media-fs.js
+- `.config`
+  - Configuration for the app, contains root list of bookmarks.
+    - Location determined by platform and ability to write to the location... typically ends up being:
+      - mac: `~/Library/Preferences/<appname>`
+      - win: `~/AppData/<appname>`
+      - rpi: `/mnt/usb/<appname>` or `~/.<appname>`
+      - linux, others: `~/.<appname>`
+    - See `getUserDir()` for how this location is determined
+- `media-fs.js`
   - Javascript lib for accessing Media files on the network
-- test-media-fs.js
+- `test-media-fs.js`
   - command line script to access Media files on the network (test driver for the lib, and educational)
 
 ### Install:
+Add to your project's `package.json`
 ```
-TODO:
+  "dependencies": {
+    "dlnajs": "https://github.com/subatomicglue/media-fsjs#main",
+  }
+```
+Then run `npm install` to pull the new dependency:
+```
+$ npm install
+```
+
+Include `media-fs` to your NodeJS `.js` file:
+```
+let mediafs = require( 'media-fsjs/media-fs.js' );
+```
+
+Initialize and configure `mediafs` with your app's name:
+```
+mediafs.init( { appname: "MyAppNameGoesHere" } )
+```
+To get a folder listing:
+```
+let listing = mediafs.dir( "/" )
+```
+To get a child folder listing (relative, avoids redundant reads):
+```
+listing = mediafs.dir( "Music", listing ) // <-- relative look up
+```
+
+To add a bookmark:
+```
+mediafs.addRootBookmark_FS( "/path/to/some/location" )
+
+// fetch the updated root folder
+let listing = mediafs.dir( "/" )
+```
+To remove a bookmark:
+```
+mediafs.delRootBookmark( "Music" )
+
+// fetch the updated root folder
+let listing = mediafs.dir( "/" )
 ```
 
 ## Status:
