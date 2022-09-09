@@ -15,9 +15,11 @@ const DEFAULT_CONFIG = {
   ]
 };
 let CONFIGNAME = ".config";
-const ROOTFOLDER = { name: "/", path: "/", _type: "root", type: "dir", resource: "root:///", resource_parent: "root:///", abs_path: "/", abs_path_parent: "/", root_path: "/" }
+const ROOTFOLDER = { name: "/", path: "/", _type: "root", type: "dir", resource: "root:///", resource_parent: "root:///", abs_path: "", abs_path_parent: "", abs_path_top: "" }
 let VERBOSE=false;
 let USERDIR = getUserDir( "media-fs" );
+const DEFAULT_IMAGE="file://assets/default.png";
+const DEFAULT_DLNA_IMAGE="file://assets/default-dlna.png";
 
 //////////////////////////////////////////////////////////////
 // UTILITIES
@@ -103,10 +105,21 @@ function getExt( filename ) {
   return m ? m[0] : ""
 }
 
-// get the file path  e.g. "/home/user/happyuser/Downloads"
+// get the file path e.g.:
+// - "/path/to/Downloads" from "/path/to/Downloads/myfile.m4a"
+// - "Downloads" from "Downloads/myfile.m4a"
+// - "" from "Downloads"
 function getPath( filepath ) {
-  return filepath ? filepath.replace( /\/[^\/]+$/, "" ).replace( /^$/, "/" ) : ""
+  return filepath ? (filepath.match( /\// ) ? filepath.replace( /\/[^\/]+$/, "" ).replace( /^$/, "/" ) : "") : ""
 }
+
+// getPath tests
+(()=>{
+  function testGetPath( a, b ) { if (getPath( a ) != b) console.log( `TEST FAILED: ${getPath( a )} != ${b}` ) }
+  testGetPath( "/path/to/Downloads/myfile.m4a", "/path/to/Downloads" )
+  testGetPath( "Downloads/myfile.m4a", "Downloads" )
+  testGetPath( "Downloads", "" )
+})()
 
 // get the file name  e.g. "subatomicglue - aeonblue - dance of the butterfly"
 function getFilename( filepath ) {
@@ -133,26 +146,29 @@ function shortenImageName( i, rootdir ) {
 }
 
 function getImage( filepath ) {
-  filepath = fsPath( filepath );
-  if (filepath == undefined) return "assets/default.png"
+  filepath = fs.statSync( filepath ).isDirectory() ? filepath : fsPath( filepath );
+  if (filepath == undefined) return DEFAULT_IMAGE
 
+  let image;
   // if (fs.statSync( filepath ).isDirectory()) {
+  //   image =
+  // } else {
+    let path_filename = path.join( getPath( filepath ), getFilename( filepath ) );
+    image = (
+      // TODO: detect if <filepath> is an image type, (maybe) generate a thumbnail for it, and return a link to the thumb (or actual file)
+      fs.existsSync( path.join( filepath, "Folder.jpg" ) ) ? ("file://" + path.join( filepath, "Folder.jpg" )) :
+      fs.existsSync( path.join( filepath, "Folder.png" ) ) ? ("file://" + path.join( filepath, "Folder.png" )) :
+      fs.existsSync( path.join( filepath, "Folder.gif" ) ) ? ("file://" + path.join( filepath, "Folder.gif" )) :
+      fs.existsSync( path_filename + ".jpg" ) ? ("file://" + path_filename + ".jpg") :
+      fs.existsSync( path_filename + ".png" ) ? ("file://" + path_filename + ".png") :
+      fs.existsSync( path_filename + ".gif" ) ? ("file://" + path_filename + ".gif") :
+      fs.existsSync( path.join( getPath( filepath ), "Folder.jpg" ) ) ? ("file://" + path.join( getPath( filepath ), "Folder.jpg" )) :
+      fs.existsSync( path.join( getPath( filepath ), "Folder.png" ) ) ? ("file://" + path.join( getPath( filepath ), "Folder.png" )) :
+      fs.existsSync( path.join( getPath( filepath ), "Folder.gif" ) ) ? ("file://" + path.join( getPath( filepath ), "Folder.gif" )) :
+      DEFAULT_IMAGE
+    )
   // }
-  let path_filename = path.join( getPath( filepath ), getFilename( filepath ) );
-  let image = (
-    // TODO: detect if <filepath> is an image type, (maybe) generate a thumbnail for it, and return a link to the thumb (or actual file)
-    fs.existsSync( path.join( filepath, "Folder.jpg" ) ) ? ("file://" + path.join( filepath, "Folder.jpg" )) :
-    fs.existsSync( path.join( filepath, "Folder.png" ) ) ? ("file://" + path.join( filepath, "Folder.png" )) :
-    fs.existsSync( path.join( filepath, "Folder.gif" ) ) ? ("file://" + path.join( filepath, "Folder.gif" )) :
-    fs.existsSync( path_filename + ".jpg" ) ? ("file://" + path_filename + ".jpg") :
-    fs.existsSync( path_filename + ".png" ) ? ("file://" + path_filename + ".png") :
-    fs.existsSync( path_filename + ".gif" ) ? ("file://" + path_filename + ".gif") :
-    fs.existsSync( path.join( getPath( filepath ), "Folder.jpg" ) ) ? ("file://" + path.join( getPath( filepath ), "Folder.jpg" )) :
-    fs.existsSync( path.join( getPath( filepath ), "Folder.png" ) ) ? ("file://" + path.join( getPath( filepath ), "Folder.png" )) :
-    fs.existsSync( path.join( getPath( filepath ), "Folder.gif" ) ) ? ("file://" + path.join( getPath( filepath ), "Folder.gif" )) :
-    "assets/default.png"
-  )
-  //console.log( filepath, "=>", image.slice( 0, 100 ) );
+  console.log( `finding image for: "${filepath}" => ${image.slice( 0, 100 )}` );
   return image;
 }
 
@@ -171,11 +187,22 @@ function fillCategory( item ) {
 }
 
 function enrich( item, virtual_dir = "" ) {
-  item.abs_path = eliminateDotDot(virtual_dir + "/" + item.path);
-  item.abs_path_parent = getPath( item.abs_path );
-  item.root_path = virtual_dir.replace( /^(\/[^\/]+).*$/, "$1" ).replace( /^$/, "/" );
+  item.abs_path = eliminateDotDot( path.join( virtual_dir, item.path ) ).replace( /^([^/])/, "/$1" );
+  item.abs_path_parent = getPath( item.abs_path ).replace( /^([^/])/, "/$1" );
+
+  // put special things into "." entry
+  if (item.path == ".") {
+    item.abs_path_top = item.abs_path_parent.replace( /^(\/[^\/]+).*$/, "$1" ).replace( /^([^/])/, "/$1" );
+  }
+//   console.log( `enrich():
+// - virtual dir:          "${virtual_dir}"
+// - item.path:            "${item.path}"
+// - item.abs_path:        "${item.abs_path}"
+// - item.abs_path_parent: "${item.abs_path_parent}"` )
 }
+
 async function enrichFS( item, virtual_dir = "" ) {
+  item.image = DEFAULT_IMAGE;
   //VERBOSE && console.log( "enriching: ", item )
 
   // VirtualFS metadata:
@@ -198,6 +225,13 @@ async function enrichFS( item, virtual_dir = "" ) {
   return item;
 }
 
+async function enrichRoot( item, virtual_dir = "" ) {
+  item.name = "/"
+  item._type = "root"
+  item.image = DEFAULT_IMAGE;
+  return item;
+}
+
 async function enrichFS_Audio( r, virtual_dir = "" ) {
   let ext_2_mime = {
     m4a: "audio/mp4",
@@ -206,10 +240,13 @@ async function enrichFS_Audio( r, virtual_dir = "" ) {
     wav: "audio/x-wav",
   }
   // https://www.npmjs.com/package/node-id3
-  if (r._type == "fs.file" && r.ext && r.ext.match( new RegExp( `/${Object.keys( ext_2_mime ).join("|")}/i` ) )){
+  let is_audio_file_pattern = `\\.(${Object.keys( ext_2_mime ).join("|")})`;
+  let is_audio_file = r._type == "fs.file" && r.ext && (r.ext.match( new RegExp( is_audio_file_pattern, 'i' ) ) != null);
+  //VERBOSE && console.log( `[mediafs] ${r._type == "fs.file" ? r.ext : r._type} Audio File:`, is_audio_file, is_audio_file_pattern )
+  if (is_audio_file){
     let ext = getExt( r.resource );
     const tags = await musicmetadata.parseFile( r.resource, { duration: false } ); // duration takes a long time for mp3 files...
-    //console.log( "tagging....", r, tags )
+    //VERBOSE && console.log( "[mediafs] pulling metatags....", r, tags )
     //r.path = tags.common.title ? tags.common.title : r.path;
     r.title = tags.common.title;
     r.artist = tags.common.artist;
@@ -217,8 +254,8 @@ async function enrichFS_Audio( r, virtual_dir = "" ) {
     if (tags.common.picture) {
       let picture = musicmetadata.selectCover( tags.common.picture ); // pick the cover image
       if (picture) {
-        r.picture = convertBufferToImageEmbed( picture.data, picture.format );
-        //console.log( "picture", r.picture )
+        r.image = convertBufferToImageEmbed( picture.data, picture.format );
+        //VERBOSE && console.log( "[mediafs] picture", r.picture )
       }
     }
     r.duration = tags.format.duration
@@ -226,16 +263,20 @@ async function enrichFS_Audio( r, virtual_dir = "" ) {
   }
 }
 
-function enrichDLNA( item, dlna_src, virtual_dir = "" ) {
-  //VERBOSE && console.log( "enriching: ", item )
+function enrichDLNA( item, dlna_src = undefined, virtual_dir = "" ) {
+  item.image = DEFAULT_DLNA_IMAGE;
+  //VERBOSE && console.log( "enriching DLNA: ", item );
+  //console.log( `=================================\nenriching DLNA: path: "${item.path}" abs_path: "${item.abs_path}" virtual: "${virtual_dir}"` );
+
+  // copy dlna item fields into the item, if given
   [
     {dlna: 'title', item: 'title'},
     {dlna: 'title', item: 'name'},
     {dlna: 'album', item: 'album'},
     {dlna: 'artist', item: 'artist'},
     {dlna: 'genre', item: 'genre'},
-    {dlna: 'art', item: 'art'},
-    {dlna: 'icon', item: 'icon'},
+    {dlna: 'icon', item: 'image'},
+    {dlna: 'art', item: 'image'},
     {dlna: 'description', item: 'description'},
     {dlna: 'file', item: 'content'},
   ].forEach( m => { if (dlna_src && dlna_src[m.dlna]) item[m.item] = dlna_src[m.dlna] } )
@@ -369,6 +410,7 @@ function getUserDir( name ) {
 
 // get a "directory listing" of the root bookmarks configured/saved.
 async function dirRoot( resolve = false ) {
+  //console.log( "[dirRoot]")
   let config = loadConfig()
   if (config && config.root_folder_listing) {
     let listing = config.root_folder_listing;
@@ -410,16 +452,19 @@ async function dirFS( dir, virtual_dir ) {
   if (virtual_parent == '/') {
     let dotdot = JSON.parse( JSON.stringify( ROOTFOLDER ))
     dotdot.path = ".."
+    dotdot = await enrichRoot( dotdot, virtual_dir );
+    //console.log( ".. ============ROOT=================", dotdot );
     result.unshift( dotdot );
   } else {
     let dotdot = { path: "..", resource: getPath( dir ) };
     dotdot = await enrichFS( dotdot, virtual_dir );
+    //console.log( ".. =============PARENT================", dotdot );
     result.unshift( dotdot );
   }
 
   // sort certain directories by time:
   if (dir.match( /\/(Documents|Downloads)$/ ))
-    result = result.sort( (a, b) => a.time == b.time ? 0 : a.time < b.time ? 1 : -1 )
+    result = result.sort( (a, b) => a.time == b.time ? 0 : a.time < b.time ? 1 : -1 ).sort( (a,b) => a.path == ".." ? -1 : 0 ).sort( (a,b) => a.path == "." ? -1 : 0 )
 
   return result;
 }
@@ -430,8 +475,7 @@ async function dirFS( dir, virtual_dir ) {
 // get a "directory listing" of all DLNA/uPnP media servers on the network (if path is undefined)
 // get a "directory listing" of the DLNA/uPnP content folder (if path is given)
 async function dirDlna( path = undefined, virtual_dir = "", item ) {
-  VERBOSE && console.log( " - dirDlna():", path, virtual_dir );
-
+  VERBOSE && console.log( ` - dirDlna(): path:"${path}" virtual:"${virtual_dir}"` );
   if (path && path != "/") {
     let resource = path.split( "|" )
     let url = resource[0]
@@ -458,7 +502,13 @@ async function dirDlna( path = undefined, virtual_dir = "", item ) {
     return listing;
   } else {
     let disc = await dlna.info();
-    return Object.keys( disc ).map( r => enrichDLNA( { path: disc[r].name, resource: disc[r].contentdir_control_url + "|0", _type: "dlna.mediaserver" }, virtual_dir ) );
+    //console.log( "DLNA DISCOVERY INFO:", disc )
+    return Object.keys( disc ).map( r => enrichDLNA(
+        { path: disc[r].name, resource: disc[r].contentdir_control_url + "|0", _type: "dlna.mediaserver" },
+        undefined,
+        virtual_dir
+      )
+    );
   }
 }
 
@@ -469,10 +519,11 @@ async function dirDlna( path = undefined, virtual_dir = "", item ) {
 // resolve works by replacing a placeholder item with whatever items were found
 // the placeholder is something that takes time to find, so it's lazy loaded later
 async function resolveItems( items ) {
+  //console.log( "RESOLVE" )
   for (let i = items.length - 1; 0 <= i; --i) {
     if (items[i]._type == "dlna.discovery") {
       let new_items = await dirDlna();
-      console.log( "resolving", items[i] )
+      //console.log( "resolving", items[i] )
       new_items.map( r => r.abs_path = items[i].abs_path + "/" + r.path )
       if (new_items.length > 0) {
         items.splice( i, 1 ); // erase the item...
@@ -504,7 +555,7 @@ module.exports.init = init;
 // listing - when using a virtual relative path, supply the path's parent folder listing.  Avoids redundant lookups (single lookup for each relative path).
 // resolve - certain types are lazy loaded, like _type="dlna.discovery", call dir( "/" ) then dir( "/", undefined, true ) to replace the list item with it's children
 async function dir( path = "/", listing = undefined, resolve = false, absolute_path = "", previous_item = undefined ) {
-  //VERBOSE && console.log( "dir", path, listing, resolve )
+  VERBOSE && console.log( "dir", path, listing, resolve, absolute_path )
   // sanitize erroneous /'s
   path = path.replace( /\/+/, "/" ).replace( /(.+)\/$/, "$1" )
 
@@ -527,10 +578,11 @@ async function dir( path = "/", listing = undefined, resolve = false, absolute_p
   let item = listing.find( r => r.path == (first_path == "" ? "/" : first_path) );
   // previous_item = previous_item == undefined && listing ? listing.find( r => r.path == "." ) : previous_item;  // pull the previous item out of the listing if it's not set (for relative path)
 
-  // VERBOSE && console.log( " - listing", listing )
-  // VERBOSE && console.log( " - item found from listing:", item )
+  VERBOSE && console.log( " - listing", listing )
+  VERBOSE && console.log( " - item found from listing:", item )
 
   // unable to recurse any farther, tail recursion end case, just return the listing
+  //if (item == undefined && next_path) return listing;
   if (item == undefined) return listing;
 
   // if going back...
@@ -538,7 +590,7 @@ async function dir( path = "/", listing = undefined, resolve = false, absolute_p
   //   item.path = item._path;
   //   item.name = item._name;
   // }
-  
+
   absolute_path = eliminateDotDot( item.abs_path_parent + (item.abs_path_parent == "/" ? "" : "/") + first_path )
 
   //if (previous_item) { previous_item._name = previous_item.name; previous_item._path = previous_item.path; previous_item.name = ".."; previous_item.path = ".."; if (previous_item.previous_item) delete previous_item.previous_item; }
