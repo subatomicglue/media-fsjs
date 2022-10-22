@@ -23,6 +23,7 @@ function getPath( filepath ) {
 let args = [];
 let VERBOSE=false;
 let RESOLVE=false;
+let FORCE=false;
 
 /////////////////////////////////////
 // scan command line args:
@@ -33,9 +34,9 @@ function usage()
   console.log( `Usage:
    ${me}                                         (outputs the / path)
    ${me} "/"                                     (outputs the / path)
-   ${me} <absolute item name>                    (recursive listing retrieval, slow)
-   ${me} <relative item name>   <last dir data>  (uses the last dir listing to list the item)
+   ${me} <absolute item name>                    (recursive listing retrieval)
    ${me} --resolve                               (resolve dlna discovery items before returning result)
+   ${me} --force                                 (do not use the cache to fetch results)
    ${me} --help                                  (this help)
    ${me} --verbose                               (output verbose information)
   ` );
@@ -52,6 +53,10 @@ for (let i = 2; i < (ARGC+2); i++) {
 
   if (ARGV[i] == "--verbose") {
     VERBOSE=true
+    continue
+  }
+  if (ARGV[i] == "--force") {
+    FORCE=true
     continue
   }
   if (ARGV[i] == "--resolve") {
@@ -88,8 +93,7 @@ if (non_flag_args_required != 0 && (ARGC == 0 || !(non_flag_args >= non_flag_arg
 // main entrypoint
 (async () => {
   mediafs.setVerbose( VERBOSE );
-  let result = await mediafs.dir( args.length == 0 ? "/" : args[0], args.length > 1 ? JSON.parse( args[1] ) : undefined, RESOLVE );
+  let result = await mediafs.dir( args.length == 0 ? "/" : args[0], args.length > 1 ? JSON.parse( args[1] ) : undefined, RESOLVE, FORCE );
   console.log( `result:`, result )
-  console.log( `last dir data:  '${JSON.stringify( result )}'` )
   process.exit( 0 );
 }) ()

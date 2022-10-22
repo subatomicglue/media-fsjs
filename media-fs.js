@@ -5,6 +5,68 @@ let path = require( 'path' );
 let musicmetadata = require( 'music-metadata' );
 let isPi = require( 'detect-rpi' ); // detect raspberry pi
 
+let fs_cache;
+function fs_reset() {
+  fs_cache = {};
+}
+function fs_existsSync( file ) {
+  if (fs_cache == undefined) fs_reset();
+  if (fs_cache[file]) return true;
+  if (fs.existsSync( file )) {
+    fs_cache[file] = {}
+    fs_cache[file].stat = fs.statSync( file );
+    return true;
+  }
+  return false;
+}
+function fs_statSync( file ) {
+  if (fs_existsSync( file )) return fs_cache[file].stat;
+
+  // not found at all.
+  return {
+    isDirectory: () => false,
+    isFile: () => false,
+    mtimeMs: -1,
+  };
+}
+function fs_checkPermissions( file, perms = fs.R_OK | fs.W_OK ) {
+  if (fs_existsSync( file )) {
+    if (fs_cache[file].read == undefined) {
+      fs_cache[file].read = checkPermissions( file, fs.R_OK );
+      fs_cache[file].write = checkPermissions( file, fs.W_OK );
+    }
+    return (((perms & fs.R_OK) == fs.R_OK && fs_cache[file].read) || ((perms & fs.R_OK) == 0)) && (((perms & fs.W_OK) == fs.W_OK && fs_cache[file].write) || ((perms & fs.W_OK) == 0));
+  }
+  return false;
+}
+async function fs_media( file, options = { duration: false } ) {
+  if (isAudioFile( file )) {
+    if (fs_cache[file].media_tags) return fs_cache[file].media_tags;
+
+    let tags = await musicmetadata.parseFile( file, options ); // duration takes a long time for mp3 files...
+    if (fs_cache[file]) // the await above means that another process could have fs_reset() and caused this to be undefined.
+      fs_cache[file].media_tags = tags;
+    return tags;
+  }
+}
+async function fs_getImageFromMetadata( file ) {
+  if ("image" in fs_cache[file]) return fs_cache[file].image;
+  const tags = await fs_media( file, { duration: false } ); // duration takes a long time for mp3 files...
+  if (tags && tags.common.picture) {
+    let picture = musicmetadata.selectCover( tags.common.picture ); // pick the cover image
+    if (picture) {
+      let image = convertBufferToImageEmbed( picture.data, picture.format );
+      if (fs_cache[file]) // the await above means that another process could have fs_reset() and caused this to be undefined.
+        fs_cache[file].image = image;
+      //VERBOSE && console.log( "[mediafs] picture", r.picture )
+      return image;
+    }
+  }
+  if (fs_cache[file]) // the await above means that another process could have fs_reset() and caused this to be undefined.
+    fs_cache[file].image = undefined;
+  return undefined;
+}
+
 // config data
 const DEFAULT_CONFIG = {
   root_folder_listing: [
@@ -15,14 +77,51 @@ const DEFAULT_CONFIG = {
   ]
 };
 let CONFIGNAME = ".config";
+let CACHENAME = ".cache";
 const ROOTFOLDER = { name: "/", path: "/", _type: "root", type: "dir", resource: "root:///", resource_parent: "root:///", abs_path: "", abs_path_parent: "", abs_path_top: "" }
 let VERBOSE=false;
 let USERDIR = getUserDir( "media-fs" );
-const DEFAULT_IMAGE="file://assets/default.png";
-const DEFAULT_DLNA_IMAGE="file://assets/default-dlna.png";
+const DEFAULT_IMAGE_FS="assets/default.png";
+const DEFAULT_IMAGE=`file://${DEFAULT_IMAGE_FS}`;
+const DEFAULT_AUDIO_IMAGE_FS="assets/default-audio2.png";
+const DEFAULT_AUDIO_IMAGE=`file://${DEFAULT_AUDIO_IMAGE_FS}`;
+const DEFAULT_DLNA_IMAGE_FS="assets/default-dlna.png";
+const DEFAULT_DLNA_IMAGE=`file://${DEFAULT_DLNA_IMAGE_FS}`;
+
+/// cache
+/// maps abs path to resource locator, flat
+// let cache = {
+//   "Downloads": {
+//     item: { ... },
+//     listing: [] // what dir( path ) normally returns
+//   }
+// };
+let cache;
+function setCache( path, item, listing ) {
+  if (path != "")
+    cache[path] = {
+      item: item,
+      listing: listing
+    }
+  saveStore( cache, CACHENAME );
+}
+function getCache( path ) {
+  if (cache == undefined) {
+    cache = loadStore( CACHENAME, {} );
+  }
+  return cache[path];
+}
+
+
 
 //////////////////////////////////////////////////////////////
 // UTILITIES
+
+// deeply clone an object hierarchy
+function deepClone( obj ) {
+  if (obj == undefined) return undefined;
+  return JSON.parse( JSON.stringify( obj ) );
+}
 
 // filter the path to NOT have file://
 function fsPath( path ) {
@@ -35,7 +134,7 @@ function httpPath( path ) {
 }
 
 // fs.accessSync is so close, yet just not there.   Make it return true/false:
-function checkPermissions( file, perms ) {
+function checkPermissions( file, perms = fs.R_OK | fs.W_OK ) {
   try {
     fs.accessSync(fsPath( file ), perms);
     return true;
@@ -49,7 +148,7 @@ function dirIsGood( path, writable = false ) {
   path = fsPath( path )
   let perms = fs.constants.R_OK;
   if (writable) perms = perms | fs.constants.W_OK;
-  return fs.existsSync( path ) && checkPermissions( path, perms ) && fs.statSync( path ).isDirectory()
+  return fs_existsSync( path ) && fs_checkPermissions( path, perms ) && fs_statSync( path ).isDirectory()
 }
 
 // is the file good to read/write?
@@ -57,19 +156,19 @@ function fileIsGood( path, writable = false ) {
   path = fsPath( path )
   let perms = fs.constants.R_OK;
   if (writable) perms = perms | fs.constants.W_OK;
-  return fs.existsSync( path ) && checkPermissions( path, perms ) && fs.statSync( path ).isFile()
+  return fs_existsSync( path ) && fs_checkPermissions( path, perms ) && fs_statSync( path ).isFile()
 }
 
 // LocalFS metadata: get the mime type for the filename based on extension
 function getMime( filename ) {
   switch (getExt( filename )) {
-    case ".jpg": return "image/jpeg";
-    case ".png": return "image/png";
-    case ".gif": return "image/gif";
-    case ".wav": return "audio/wav";
-    case ".mp3": return "audio/mp3";
-    case ".m4a": return "audio/x-m4a";
-    case ".aac": return "audio/aac";
+    case "jpg": return "image/jpeg";
+    case "png": return "image/png";
+    case "gif": return "image/gif";
+    case "wav": return "audio/wav";
+    case "mp3": return "audio/mp3";
+    case "m4a": return "audio/x-m4a";
+    case "aac": return "audio/aac";
     default: return "data/blob" // todo: what's the real type here?
   }
 }
@@ -77,7 +176,7 @@ function getMime( filename ) {
 // LocalFS metadata: get the type of LocalFS object pointed to by the path, fs.dir or fs.file
 function getType( path ) {
   try {
-    let type = fs.statSync( fsPath( path ) ).isDirectory() ? "fs.dir" : "fs.file"
+    let type = fs_statSync( fsPath( path ) ).isDirectory() ? "fs.dir" : "fs.file"
     //console.log( type , path )
     return type;
   } catch (e) {
@@ -88,21 +187,21 @@ function getType( path ) {
 // LocalFS metadata: get the timestamp of the fs object
 function getTime( path ) {
   try {
-    return fs.statSync( fsPath( path ) ).mtimeMs;
+    return fs_statSync( fsPath( path ) ).mtimeMs;
   } catch (e) {
     return -1;
   }
 }
 
 
-// get the file extension  e.g. ".mp3"
+// get the file extension  e.g. "mp3", or "" when none
 // function getExt( path ) {
 //   return path.replace( /^.*([^.]+)$/, "$1" ).toLowerCase()
 // }
 function getExt( filename ) {
-  let m = filename ? filename.match( /\.[^\.]+$/ ) : "";
+  let m = filename ? filename.replace( /^.*\.([^\.]+)$/, "$1" ) : "";
   //console.log( path, m )
-  return m ? m[0] : ""
+  return m;
 }
 
 // get the file path e.g.:
@@ -145,32 +244,109 @@ function shortenImageName( i, rootdir ) {
   return i ? i.replace( "file://" + rootdir + "/", "" ).replace( /\.[^\.]+$/, "" ) : ""
 }
 
-function getImage( filepath ) {
-  filepath = fs.statSync( filepath ).isDirectory() ? filepath : fsPath( filepath );
-  if (filepath == undefined) return DEFAULT_IMAGE
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// FILESYSTEM FILE/FOLDER ICON
+async function getImage( filepath, dircache ) {
+  //console.log( "[getImage] ", filepath )
+  filepath = fsPath( filepath );
+  let images = [];
+  if (filepath == undefined) return DEFAULT_IMAGE_FS
 
-  let image;
-  // if (fs.statSync( filepath ).isDirectory()) {
-  //   image =
-  // } else {
-    let path_filename = path.join( getPath( filepath ), getFilename( filepath ) );
-    image = (
-      // TODO: detect if <filepath> is an image type, (maybe) generate a thumbnail for it, and return a link to the thumb (or actual file)
-      fs.existsSync( path.join( filepath, "Folder.jpg" ) ) ? ("file://" + path.join( filepath, "Folder.jpg" )) :
-      fs.existsSync( path.join( filepath, "Folder.png" ) ) ? ("file://" + path.join( filepath, "Folder.png" )) :
-      fs.existsSync( path.join( filepath, "Folder.gif" ) ) ? ("file://" + path.join( filepath, "Folder.gif" )) :
-      fs.existsSync( path_filename + ".jpg" ) ? ("file://" + path_filename + ".jpg") :
-      fs.existsSync( path_filename + ".png" ) ? ("file://" + path_filename + ".png") :
-      fs.existsSync( path_filename + ".gif" ) ? ("file://" + path_filename + ".gif") :
-      fs.existsSync( path.join( getPath( filepath ), "Folder.jpg" ) ) ? ("file://" + path.join( getPath( filepath ), "Folder.jpg" )) :
-      fs.existsSync( path.join( getPath( filepath ), "Folder.png" ) ) ? ("file://" + path.join( getPath( filepath ), "Folder.png" )) :
-      fs.existsSync( path.join( getPath( filepath ), "Folder.gif" ) ) ? ("file://" + path.join( getPath( filepath ), "Folder.gif" )) :
-      DEFAULT_IMAGE
-    )
-  // }
-  console.log( `finding image for: "${filepath}" => ${image.slice( 0, 100 )}` );
+
+
+  function escForRegex( str ) {
+    return str ? str.replace( /([./])/g, `\\$1` ) : ""
+  }
+
+  function folderImages( filepath, names = ["Folder","folder","FOLDER"], types = ["jpg","png","gif", "JPG","PNG","GIF"] ) {
+    return names.flatMap( r => types.map( f => path.join( filepath, `${r}.${f}` ) ));
+  }
+
+  function folderAudioFiles( filepath ) {
+    if (!fs_statSync( filepath ).isDirectory() || !fs_checkPermissions( filepath, fs.R_OK )) return [];
+
+    let files = fs.readdirSync( filepath )
+    let ranking = {
+      m4a: 1,
+      mp3: 2,
+      //flac: 3,
+      //ogg: 4,
+      //wav: 5,
+    }
+    files = files.map( r => path.join( filepath, r ) )
+    files = files.filter( r => ranking[getExt( r )] != undefined && fs_existsSync( r ) )
+    files = files.sort( (a, b) => (ranking[getExt( a )] || 4) < (ranking[getExt( b )] || 4) ? -1 : 1 );
+    return files;
+  }
+
+  function findRoot( filepath ) {
+    // read the global root_listing which should be up to date...
+    let root_dir = deepClone( root_listing );
+    if (root_dir) {
+      root_dir = root_dir.filter( r => {
+        //console.log( `regex:    "^${escForRegex( r.resource )}"` )
+        return filepath.match( new RegExp( `^${escForRegex( r.resource )}` ) )
+      })
+    }
+    return root_dir && root_dir.length > 0 && root_dir[0].resource ? root_dir[0].resource : `/NOT/FOUND/ROOT/OF/${filepath}/NOT/FOUND/IN/CONFIGURED/ROOT/FOLDERS`;
+  }
+
+  function allPathsBackToRoot( filepath, maxpaths = 10 ) {
+    let retval = [];
+
+    if (fs_statSync( filepath ).isFile()) {
+      if (isAudioFile( filepath ))
+        retval.push( filepath );                                                         // see if  /filepath/filename.m4a  has an embedded picture
+      retval.push( ...folderImages( getPath( filepath ), [getFilename( filepath )] ) );  // see if  /filepath/filename.jpg  exists
+      filepath = getPath( filepath )                                                     // fallback to dir (for folder.jpg or dirname.jpg or <somefile>.m4a image)
+      if (!fs_statSync( filepath ).isDirectory()) return;                                // should be a dir
+    }
+
+    let root_path = findRoot( filepath );
+    //console.log( "[allPathsBackToRoot]   roooooot path: ", root_path, );
+    while (filepath && 0 <= (--maxpaths) && root_path && filepath != "/" && filepath.match( new RegExp( `^${escForRegex( root_path )}` ) )) {
+      //console.log( "[allPathsBackToRoot]   - parent", filepath )
+      retval.push( ...folderImages( filepath ) );                                          // see if  /filepath/folder.jpg exists
+      retval.push( ...folderImages( getPath( filepath ), [getFilename( filepath )] ) );    // see if  /filepath/../dirname.jpg  exists (weird, but ok)
+      retval.push( ...folderAudioFiles( filepath ) );                                      // see if  /filepath/<somefile>.m4a  has an embedded picture
+      filepath = getPath( filepath );
+    }
+    return retval;
+  }
+
+  images.push( ...allPathsBackToRoot( filepath, 1 ) )
+  images.push( isAudioFile( filepath ) ? DEFAULT_AUDIO_IMAGE_FS : DEFAULT_IMAGE_FS )
+  //console.log( "trying these: ", images );
+  let image = DEFAULT_IMAGE;
+  let num = 0;
+  let num_hits = 0;
+  let num_false_hits = 0;
+  const start = performance.now();
+  for (let img of images) {
+    num++;
+    if (isAudioFile( img )) {
+      image = await fs_getImageFromMetadata( img )
+      if (image) {
+        num_hits++;
+        break;
+      } else {num_false_hits++;}
+    } else if (fs_existsSync( img )) {
+      image = "file://" + img;
+      num_hits++;
+      break;
+    }
+  }
+  const end = performance.now();
+  //if (Math.floor(end - start) > 40) {
+  //  console.log( "trying these: ", images );
+  //}
+  //console.log( `finding image for: "${filepath}" => ${image.slice( 0, 100 )}  num:${num} hits:${num_hits} fhits:${num_false_hits} time:${Math.floor(end - start)}ms` );
+  if (num_hits > 1) {
+    process.exit(-1);
+  }
   return image;
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 function fillCategory( item ) {
   let mappings = {
@@ -215,7 +391,7 @@ async function enrichFS( item, virtual_dir = "" ) {
   item._type = item._type == undefined ? getType( item.resource ) : item._type;
   fillCategory( item );
   item.time = getTime( item.resource );
-  item.image = getImage( item.resource );
+  item.image = await getImage( item.resource );
   if (item._type == "fs.file") item.content = httpPath( item.resource );
   item.resource_parent = item.abs_path_parent == '/' ? undefined : item.resource.replace( /\/[^\/]+$/, "" ).replace( /^$/, "/" );
 
@@ -232,32 +408,34 @@ async function enrichRoot( item, virtual_dir = "" ) {
   return item;
 }
 
-async function enrichFS_Audio( r, virtual_dir = "" ) {
-  let ext_2_mime = {
+function isAudioFile( filepath ) {
+  const ext_2_mime = {
     m4a: "audio/mp4",
     aac: "audio/aac",
     mp3: "audio/mpeg",
     wav: "audio/x-wav",
   }
-  // https://www.npmjs.com/package/node-id3
-  let is_audio_file_pattern = `\\.(${Object.keys( ext_2_mime ).join("|")})`;
-  let is_audio_file = r._type == "fs.file" && r.ext && (r.ext.match( new RegExp( is_audio_file_pattern, 'i' ) ) != null);
+  let ext = getExt( filepath );
+  let is_audio_file = ext && ext_2_mime[ext.toLowerCase()] && fs_existsSync( filepath ) && fs_statSync( filepath ).isFile();
+  return is_audio_file;
+}
+async function enrichFS_Audio( r, virtual_dir = "" ) {
   //VERBOSE && console.log( `[mediafs] ${r._type == "fs.file" ? r.ext : r._type} Audio File:`, is_audio_file, is_audio_file_pattern )
-  if (is_audio_file){
-    let ext = getExt( r.resource );
-    const tags = await musicmetadata.parseFile( r.resource, { duration: false } ); // duration takes a long time for mp3 files...
+  if (isAudioFile( r.resource )){
+    //let ext = getExt( r.resource );
+    const tags = await fs_media( r.resource, { duration: false, picture: false } ); // duration takes a long time for mp3 files...
     //VERBOSE && console.log( "[mediafs] pulling metatags....", r, tags )
     //r.path = tags.common.title ? tags.common.title : r.path;
     r.title = tags.common.title;
     r.artist = tags.common.artist;
     r.album = tags.common.album;
-    if (tags.common.picture) {
-      let picture = musicmetadata.selectCover( tags.common.picture ); // pick the cover image
-      if (picture) {
-        r.image = convertBufferToImageEmbed( picture.data, picture.format );
-        //VERBOSE && console.log( "[mediafs] picture", r.picture )
-      }
-    }
+    // if (tags.common.picture) {
+    //   let picture = musicmetadata.selectCover( tags.common.picture ); // pick the cover image
+    //   if (picture) {
+    //     r.image = convertBufferToImageEmbed( picture.data, picture.format );
+    //     //VERBOSE && console.log( "[mediafs] picture", r.picture )
+    //   }
+    // }
     r.duration = tags.format.duration
     r.runningtime = tags.format.duration ? toHumanReadableTime( tags.format.duration ) : "??";
   }
@@ -297,7 +475,7 @@ function convertBufferToImageEmbed( buffer, format ) {
 function convertFileToImageEmbed( fileURL ) {
   const filepath = fileURL.replace( /^file:\/\//, '' );
   let result = undefined;
-  if (fs.existsSync( filepath ) && fs.statSync( filepath ).isFile()) {
+  if (fs_existsSync( filepath ) && fs_statSync( filepath ).isFile()) {
     result = `data:${getMime(filepath)};base64,` + fs.readFileSync( filepath, { encoding: "base64" } )
   }
   return result;
@@ -311,21 +489,21 @@ function replaceEnvVars( str ) {
   return str.replace( /\${([^}]+)}/g, (all, first) => process.env[first] ).replace( /~/, (all, first) => process.env.HOME )
 }
 
-// filename is relative (without a path), defaults to CONFIGNAME, and will be relative to the USERDIR (which depends on appname set by init())
-function saveConfig( obj, filename = CONFIGNAME ) {
+// filename is relative (without a path), and will be relative to the USERDIR (which depends on appname set by init())
+function saveStore( obj, filename ) {
   let filepath = path.join( USERDIR, filename );
   fs.writeFileSync( filepath, JSON.stringify( obj, null, '  ' ), "utf8" )
-  if (!fs.existsSync( filepath ))
+  if (!fs_existsSync( filepath ))
     console.log( `[error] couldn't write to ${filepath}` )
 }
 
-// filename is relative (without a path), defaults to CONFIGNAME, and will be relative to the USERDIR (which depends on appname set by init())
-function loadConfig( filename = CONFIGNAME, default_config_obj = DEFAULT_CONFIG ) {
+// filename is relative (without a path), and will be relative to the USERDIR (which depends on appname set by init())
+function loadStore( filename, default_obj ) {
   let filepath = path.join( USERDIR, filename );
-  if (!fs.existsSync( filepath ))
-    saveConfig( default_config_obj, filename );
-  if (fs.existsSync( filepath )) {
-    console.log( `[config] loaded from ${filepath}`)
+  if (!fs_existsSync( filepath ))
+    saveStore( default_obj, filename );
+  if (fs_existsSync( filepath )) {
+    console.log( `[store] loaded: ${filepath}`)
     return JSON.parse( fs.readFileSync( filepath, 'utf-8' ) );
   }
   console.log( `[error] ${filepath} not found` )
@@ -334,7 +512,7 @@ function loadConfig( filename = CONFIGNAME, default_config_obj = DEFAULT_CONFIG 
 
 // like bash's mkdir -p, create the directory only if it doesn't already exist
 function mkdir( dir ) {
-  if (!fs.existsSync(dir)){
+  if (!fs_existsSync(dir)){
     VERBOSE && console.log( `[mkdir] creating directory ${dir}` )
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -408,13 +586,26 @@ function getUserDir( name ) {
 //////////////////////////////////////////////////////////////
 // directory abstraction: ROOT BOOKMARKS
 
-// get a "directory listing" of the root bookmarks configured/saved.
-async function dirRoot( resolve = false ) {
-  //console.log( "[dirRoot]")
-  let config = loadConfig()
+let root_listing = [];
+
+
+// will update the global root_listing when called...
+function getConfiguredRoot() {
+  let config = loadStore( CONFIGNAME, DEFAULT_CONFIG );
   if (config && config.root_folder_listing) {
     let listing = config.root_folder_listing;
     listing = listing.map( r => { if (r.resource) r.resource = replaceEnvVars( r.resource ); return r } );
+    root_listing = deepClone( listing )
+    return listing;
+  }
+  return undefined;
+}
+
+// get a "directory listing" of the root bookmarks configured/saved.
+async function dirRoot( resolve = false ) {
+  //console.log( "[dirRoot]")
+  let listing = getConfiguredRoot();
+  if (listing) {
     // use for loop for async/await
     for (let i = 0; i < listing.length; ++i) {
       let r = listing[i];
@@ -450,7 +641,7 @@ async function dirFS( dir, virtual_dir ) {
   // add the .. folder (this filesystem type supports listing parent)
   let virtual_parent = getPath( virtual_dir );
   if (virtual_parent == '/') {
-    let dotdot = JSON.parse( JSON.stringify( ROOTFOLDER ))
+    let dotdot = deepClone( ROOTFOLDER )
     dotdot.path = ".."
     dotdot = await enrichRoot( dotdot, virtual_dir );
     //console.log( ".. ============ROOT=================", dotdot );
@@ -542,41 +733,70 @@ async function resolveItems( items ) {
 
 // initialize the library before using the API functions.
 // appname - important to name your application to distinguish configuration settings between multiple apps that use media-fs
+let initFinished = false;
 function init( options = { configname: ".config", appname: "media-fs" } ) {
+  console.log( "[media-fs]  initializing...")
   if (options.appname) USERDIR = getUserDir( options.appname );
   if (options.configname) CONFIGNAME = options.configname;
+  getConfiguredRoot(); // updates root_listing
+  initFinished = true;
 }
 module.exports.init = init;
 
+async function waitForTrue( v, timeout_sec = 5 ) {
+  return new Promise( (rs, rj) => {
+    if (v == true) return rs();
+    let startTime = new Date();
+    let handle = setInterval( () => {
+      let endTime = new Date();
+      var timeDiff = (endTime - startTime)/1000;
+      if (timeout_sec < timeDiff) {
+        console.log( "timeout! v:", v )
+        clearInterval( handle );
+        return rs();
+      } else if (v == true) {
+        console.log( "it's finally true! timeout_sec:", timeout_sec )
+        clearInterval( handle );
+        return rs();
+      } else {
+        console.log( "waiting for true..." )
+      }
+    }, 1)
+  })
+}
 
 // return a listing at the directory (recursive utility)
 // path    - the virtual absolute path "/Music" (listing must be undefined) or virtual relative path "Music" (requires a listing).
 //           dir() or dir( "/" ) retrieves the root of the virtual filesystem
 // listing - when using a virtual relative path, supply the path's parent folder listing.  Avoids redundant lookups (single lookup for each relative path).
 // resolve - certain types are lazy loaded, like _type="dlna.discovery", call dir( "/" ) then dir( "/", undefined, true ) to replace the list item with it's children
-async function dir( path = "/", listing = undefined, resolve = false, absolute_path = "", previous_item = undefined ) {
-  VERBOSE && console.log( "dir", path, listing, resolve, absolute_path )
+// force   - do not use the cache, fetch everything
+// absolute_path - used for path recursion, use the default value when dalling dir()
+async function dir( vpath = "/", listing = undefined, resolve = false, force = false, absolute_path = "" ) {
+  await waitForTrue( initFinished );
+  VERBOSE && console.log( "dir", vpath, listing, resolve, force, absolute_path )
+  //console.log( `dir  abs_path:${absolute_path}` )
   // sanitize erroneous /'s
-  path = path.replace( /\/+/, "/" ).replace( /(.+)\/$/, "$1" )
+  vpath = vpath.replace( /\/+/, "/" ).replace( /(.+)\/$/, "$1" )
 
   // absolute path given (no listing to start from), so interpret relative path "Music" as absolute "/Music"
-  if (listing == undefined && path[0] != "/")
-    path = '/' + path
+  if (listing == undefined && vpath[0] != "/")
+    vpath = '/' + vpath
 
-  // parse the path requested
-  let first_path = path.split( "/" )[0];                    // when path == "/Music/Ableton/Presets", this will be ""                       |   when path == "Music/Ableton/Presets", this will be "Music"
-  let next_path = path.split( "/" ).slice( 1 ).join( "/" )  // when path == "/Music/Ableton/Presets", this will be "Music/Ableton/Presets"  |   when path == "Music/Ableton/Presets", this will be "Ableton/Presets"
+  // parse the vpath requested
+  let first_path = vpath.split( "/" )[0];                    // when vpath == "/Music/Ableton/Presets", this will be ""                       |   when vpath == "Music/Ableton/Presets", this will be "Music"
+  let next_path = vpath.split( "/" ).slice( 1 ).join( "/" )  // when vpath == "/Music/Ableton/Presets", this will be "Music/Ableton/Presets"  |   when vpath == "Music/Ableton/Presets", this will be "Ableton/Presets"
   VERBOSE && console.log( `first_path: ${first_path} next_path: ${next_path}`  )
+  absolute_path = absolute_path + (absolute_path == "/" ? "" : "/") + first_path
 
   // SEED: create a listing for "/" root, so we can find the "/" item to recurse from
   if (listing == undefined)
-    listing = [JSON.parse( JSON.stringify( ROOTFOLDER ))];
+    listing = [deepClone( ROOTFOLDER )];
 
   // we support relative path(s) or absolute:
   // - abs:  path "/Music" or "Music" given without listing (recursion begins relative to root in absense of a previous listing given)
   // - rel:  path "Music"  given with a listing
-  let item = listing.find( r => r.path == (first_path == "" ? "/" : first_path) );
-  // previous_item = previous_item == undefined && listing ? listing.find( r => r.path == "." ) : previous_item;  // pull the previous item out of the listing if it's not set (for relative path)
+  let item = deepClone( listing.find( r => r.path == (first_path == "" ? "/" : first_path) ) );
 
   VERBOSE && console.log( " - listing", listing )
   VERBOSE && console.log( " - item found from listing:", item )
@@ -591,49 +811,57 @@ async function dir( path = "/", listing = undefined, resolve = false, absolute_p
   //   item.name = item._name;
   // }
 
-  absolute_path = eliminateDotDot( item.abs_path_parent + (item.abs_path_parent == "/" ? "" : "/") + first_path )
-
-  //if (previous_item) { previous_item._name = previous_item.name; previous_item._path = previous_item.path; previous_item.name = ".."; previous_item.path = ".."; if (previous_item.previous_item) delete previous_item.previous_item; }
-  //let back_item = previous_item;
-  let back_item = undefined;
+  //absolute_path = eliminateDotDot( item.abs_path_parent + (item.abs_path_parent == "/" ? "" : "/") + first_path )
 
   console.log( `Listing: "${item.path}" (${item._type})  -->  ${absolute_path}` )
-  switch (item._type) {
-    case "root":
-      listing = await dirRoot( resolve );
-      //back_item = JSON.parse( JSON.stringify( item ) );
-      break;
+  // use cache for parent-traversal, but always re-pull the requested path
+  if (getCache( absolute_path ) && next_path != "" && force == false) {
+    listing = getCache( absolute_path ).listing;
+    //console.log( `CACHE HIT: ${absolute_path}`, next_path )
+  } else {
+    switch (item._type) {
+      case "root":
+        listing = await dirRoot( resolve );
+        break;
 
-    case "dlna.object.item.audioItem.musicTrack":
-    case "fs.file":
-      listing = [item];
-      break;
+      case "dlna.object.item.audioItem.musicTrack":
+      case "fs.file":
+        listing = [item];
+        break;
 
-    case "fs.dir":
-      if (dirIsGood( item.resource )) {
-        listing = await dirFS( item.resource, absolute_path );
-      }
-      break;
+      case "fs.dir":
+        if (dirIsGood( item.resource )) {
+          listing = await dirFS( item.resource, absolute_path );
+        }
+        break;
 
-    case "dlna.discovery":
-      listing = await dirDlna( undefined, absolute_path )
-      break;
+      case "dlna.discovery":
+        listing = await dirDlna( undefined, absolute_path )
+        break;
 
-    default:
-      // handle all other "dlna.*" types here:
-      //console.log( item )
-      if (item._type.match( /^dlna\./ )) {
-        listing = await dirDlna( item.resource, absolute_path )
-      }
-      break;
+      default:
+        // handle all other "dlna.*" types here:
+        //console.log( item )
+        if (item._type.match( /^dlna\./ )) {
+          listing = await dirDlna( item.resource, absolute_path )
+        }
+        break;
+    }
+
+    //console.log( `CACHE MISS: ${absolute_path}`, getCache( absolute_path ) != undefined, next_path == "", next_path )
+
+    // cache anything we retrieve so it's faster next time.
+    setCache( absolute_path, item, listing );
   }
 
   item.path = "."
   listing.unshift( item );
-  if (next_path == "")
-    return listing //.map( r => { if (previous_item) r.previous_item = previous_item; return r; } )
+  if (next_path == "") {
+    fs_reset(); // done... clear the quick fs stat cache
+    return listing
+  }
   else
-    return await dir( next_path, listing, resolve, absolute_path, item )
+    return await dir( next_path, listing, resolve, force, absolute_path )
 }
 
 module.exports.dir = dir;
@@ -643,20 +871,22 @@ module.exports.setVerbose = ( verbose = false ) => { VERBOSE = verbose }
 
 // remove a bookmark from the root.  written to configuration settings, persists across app load
 function delRootBookmark( path ) {
-  let config = loadConfig()
+  let config = loadStore( CONFIGNAME, DEFAULT_CONFIG );
   if (config && config.root_folder_listing) {
     config.root_folder_listing = config.root_folder_listing.filter( r => r.path != path )
-    saveConfig( config )
+    saveStore( config, CONFIGNAME )
+    getConfiguredRoot(); // update root_listing
   }
 }
 
 // add a bookmark to the root.  written to configuration settings, persists across app load
 function addRootBookmark( obj ) {
   if (obj.path && (obj._type || obj.resource)) {
-    let config = loadConfig()
+    let config = loadStore( CONFIGNAME, DEFAULT_CONFIG );
     if (config && config.root_folder_listing) {
       config.root_folder_listing.push( obj )
-      saveConfig( config )
+      saveStore( config, CONFIGNAME )
+      getConfiguredRoot(); // update root_listing
     }
   }
 }
