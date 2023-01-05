@@ -2,6 +2,7 @@
 
 let mediafs = require( "./media-fs" )
 let path = require( 'path' );
+mediafs.init();
 
 
 function getFilename( filepath ) {

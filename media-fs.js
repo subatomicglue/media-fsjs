@@ -4,6 +4,7 @@ let fs = require( 'fs' );
 let path = require( 'path' );
 let musicmetadata = require( 'music-metadata' );
 let isPi = require( 'detect-rpi' ); // detect raspberry pi
+const {performance} = require('perf_hooks');
 
 let fs_cache;
 function fs_reset() {
@@ -537,6 +538,7 @@ function getUserDir( name ) {
       path.join( process.env.HOME, "Desktop", appname ),
     ],
     "darwin": [
+      path.join( process.env.HOME, "Library/Application Support", appname ),
       path.join( process.env.HOME, "Library/Preferences", appname ),
       path.join( process.env.HOME, dotappname ),
       path.join( process.env.HOME, "Documents", appname ),
@@ -743,23 +745,23 @@ function init( options = { configname: ".config", appname: "media-fs" } ) {
 }
 module.exports.init = init;
 
-async function waitForTrue( v, timeout_sec = 5 ) {
+async function waitForValue( value_func, should_be, timeout_sec = 5 ) {
   return new Promise( (rs, rj) => {
-    if (v == true) return rs();
+    if (value_func() == should_be) return rs();
     let startTime = new Date();
     let handle = setInterval( () => {
       let endTime = new Date();
       var timeDiff = (endTime - startTime)/1000;
-      if (timeout_sec < timeDiff) {
+      if (timeout_sec < timeDiff && timeout_sec != -1) {
         console.log( "timeout! v:", v )
         clearInterval( handle );
         return rs();
-      } else if (v == true) {
+      } else if (value_func() == should_be) {
         console.log( "it's finally true! timeout_sec:", timeout_sec )
         clearInterval( handle );
         return rs();
       } else {
-        console.log( "waiting for true..." )
+        console.log( `waiting for '${value_func()}' to be '${should_be}'...1` )
       }
     }, 1)
   })
@@ -773,7 +775,7 @@ async function waitForTrue( v, timeout_sec = 5 ) {
 // force   - do not use the cache, fetch everything
 // absolute_path - used for path recursion, use the default value when dalling dir()
 async function dir( vpath = "/", listing = undefined, resolve = false, force = false, absolute_path = "" ) {
-  await waitForTrue( initFinished );
+  await waitForValue( () => initFinished, true, -1 );
   VERBOSE && console.log( "dir", vpath, listing, resolve, force, absolute_path )
   //console.log( `dir  abs_path:${absolute_path}` )
   // sanitize erroneous /'s
