@@ -55,7 +55,7 @@ UseCases:
 Add to your project's `package.json`
 ```
   "dependencies": {
-    "dlnajs": "https://github.com/subatomicglue/media-fsjs#main",
+    "media-fsjs": "https://github.com/subatomicglue/media-fsjs#main",
   }
 ```
 Then run `npm install` to pull the new dependency:
@@ -76,9 +76,9 @@ To get a folder listing:
 ```
 let listing = mediafs.dir( "/" )
 ```
-To get a child folder listing (relative, avoids redundant reads):
+To get a child folder listing:
 ```
-listing = mediafs.dir( "Music", listing ) // <-- relative look up
+let listing = mediafs.dir( "/Music" )
 ```
 
 To add a bookmark:
